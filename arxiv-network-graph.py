@@ -3,19 +3,30 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 def fetch_arxiv_data_via_openalex(topic, limit=50):
-    """
-    Queries OpenAlex for arXiv papers. 
-    OpenAlex is 'pre-indexed' arXiv data that includes citation links.
-    """
-    url = f"https://api.openalex.org/works?filter=primary_location.source.id:S4306400127,title.search:{topic}&per_page={limit}"
+    url = f"https://api.openalex.org/works?search={topic}&per_page={limit}&filter=has_fulltext:true"
     
-    print(f"Fetching {limit} papers about '{topic}'...")
-    response = requests.get(url)
-    if response.status_code != 200:
-        print("Error fetching data.")
+    print(f"📡 Searching OpenAlex for '{topic}'...")
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        results = response.json().get('results', [])
+        
+        arxiv_papers = []
+        for work in results:
+            locations = str(work.get('locations', [])).lower()
+            if 'arxiv' in locations:
+                arxiv_papers.append(work)
+        
+        if not arxiv_papers:
+            print("⚠️ No strict arXiv matches found, returning general results for this topic.",flush=True)
+            return results
+            
+        print(f"✅ Found {len(arxiv_papers)} papers.", flush=True)
+        return arxiv_papers
+        
+    except Exception as e:
+        print(f"❌ Error: {e}", flush=True)
         return []
-    
-    return response.json().get('results', [])
 
 def build_mega_graph(data):
     G = nx.DiGraph()
@@ -52,17 +63,18 @@ def visualize_graph(G, output_file="research_graph.png"):
 
     plt.title("arXiv Author-Citation Network")
     plt.savefig(output_file)
-    print(f"Graph successfully saved to {output_file}")
+    print(f"Graph successfully saved to {output_file}", flush=True)
 
 if __name__ == "__main__":
     TOPIC = "Black Holes"
     LIMIT_PAPERS = 30
 
     results = fetch_arxiv_data_via_openalex(TOPIC, limit=LIMIT_PAPERS)
+    print(f"Found {len(results)} papers", flush=True)
     if results:
         graph = build_mega_graph(results)
         visualize_graph(graph)
         
-        print(f"\nGraph Stats:")
-        print(f"Total Entities (Authors + Papers): {graph.number_of_nodes()}")
-        print(f"Total Connections (Authorship + Citations): {graph.number_of_edges()}")
+        print(f"\nGraph Stats:", flush=True)
+        print(f"Total Entities (Authors + Papers): {graph.number_of_nodes()}", flush=True)
+        print(f"Total Connections (Authorship + Citations): {graph.number_of_edges()}", flush=True)
