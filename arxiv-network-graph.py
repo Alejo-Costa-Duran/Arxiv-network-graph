@@ -1,6 +1,29 @@
 import requests
 import networkx as nx
 import matplotlib.pyplot as plt
+from pyvis.network import Network
+import os
+def visualize_interactive_graph(G, output_file="research_graph.html"):
+    print("Creating interactive graph...", flush=True)
+    net = Network(height="750px", width="100%", bgcolor="#222222", font_color="white", directed=True)
+    
+    
+    for n, data in G.nodes(data=True):
+        label = data.get('label', str(n))
+        color = data.get('color', '#808080') 
+        
+        
+        net.add_node(n, label=label[:30], title=label, color=color)
+
+    for source, target, data in G.edges(data=True):
+        net.add_edge(source, target, title=data.get('relation', ''))
+
+    net.force_atlas_2based()
+    
+    path = os.path.join("/app/output", output_file)
+    net.save_graph(path)
+    print(f"✅ Interactive graph saved to {path}")
+
 
 def fetch_arxiv_data_via_openalex(topic, limit=50):
     url = f"https://api.openalex.org/works?search={topic}&per_page={limit}&filter=has_fulltext:true"
@@ -29,41 +52,31 @@ def fetch_arxiv_data_via_openalex(topic, limit=50):
         return []
 
 def build_mega_graph(data):
-    G = nx.DiGraph()
+    G = nx.DiGraph() 
 
     for work in data:
         paper_id = work.get('id')
         paper_title = work.get('display_name')
         
+        if not paper_id:
+            continue
+            
         G.add_node(paper_id, label=paper_title, type='paper', color='skyblue')
 
         for authorship in work.get('authorships', []):
             author = authorship.get('author', {})
             author_id = author.get('id')
-            author_name = author.get('display_name')
+            author_name = author.get('display_name') or "Unknown Author"
             
-            G.add_node(author_id, label=author_name, type='author', color='orange')
-            G.add_edge(author_id, paper_id, relation='authored')
+            if author_id:
+                G.add_node(author_id, label=author_name, type='author', color='orange')
+                G.add_edge(author_id, paper_id, relation='authored')
+
         for cited_paper_id in work.get('referenced_works', []):
-            G.add_edge(paper_id, cited_paper_id, relation='cites')
+            if cited_paper_id:
+                G.add_edge(paper_id, cited_paper_id, relation='cites')
 
     return G
-
-def visualize_graph(G, output_file="research_graph.png"):
-    plt.figure(figsize=(12, 12))
-    
-    node_colors = [data['color'] for n, data in G.nodes(data=True)]
-    labels = {n: data['label'][:20] + "..." if len(data['label']) > 20 else data['label'] 
-              for n, data in G.nodes(data=True)}
-
-    pos = nx.spring_layout(G, k=0.3)
-    nx.draw(G, pos, labels=labels, with_labels=True, 
-            node_color=node_colors, node_size=1000, 
-            font_size=7, edge_color='gray', alpha=0.6)
-
-    plt.title("arXiv Author-Citation Network")
-    plt.savefig(output_file)
-    print(f"Graph successfully saved to {output_file}", flush=True)
 
 if __name__ == "__main__":
     TOPIC = "Black Holes"
@@ -73,7 +86,7 @@ if __name__ == "__main__":
     print(f"Found {len(results)} papers", flush=True)
     if results:
         graph = build_mega_graph(results)
-        visualize_graph(graph)
+        visualize_interactive_graph(graph)
         
         print(f"\nGraph Stats:", flush=True)
         print(f"Total Entities (Authors + Papers): {graph.number_of_nodes()}", flush=True)

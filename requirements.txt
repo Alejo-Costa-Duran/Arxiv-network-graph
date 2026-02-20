@@ -2,3 +2,5 @@ arxiv
 networkx
 matplotlib
 requests
+scipy
+pyvis
