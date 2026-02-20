@@ -1,93 +1,89 @@
 import requests
 import networkx as nx
-import matplotlib.pyplot as plt
 from pyvis.network import Network
 import os
-def visualize_interactive_graph(G, output_file="research_graph.html"):
-    print("Creating interactive graph...", flush=True)
-    net = Network(height="750px", width="100%", bgcolor="#222222", font_color="white", directed=True)
-    
-    
-    for n, data in G.nodes(data=True):
-        label = data.get('label', str(n))
-        color = data.get('color', '#808080') 
-        
-        
-        net.add_node(n, label=label[:30], title=label, color=color)
 
-    for source, target, data in G.edges(data=True):
-        net.add_edge(source, target, title=data.get('relation', ''))
-
-    net.force_atlas_2based()
-    
-    path = os.path.join("/app/output", output_file)
-    net.save_graph(path)
-    print(f"✅ Interactive graph saved to {path}")
-
-
-def fetch_arxiv_data_via_openalex(topic, limit=50):
+def fetch_arxiv_data_via_openalex(topic, limit=100):
     url = f"https://api.openalex.org/works?search={topic}&per_page={limit}&filter=has_fulltext:true"
-    
-    print(f"📡 Searching OpenAlex for '{topic}'...")
+    print(f"📡 Searching OpenAlex for '{topic}'...", flush=True)
     try:
         response = requests.get(url, timeout=10)
-        response.raise_for_status()
         results = response.json().get('results', [])
-        
-        arxiv_papers = []
-        for work in results:
-            locations = str(work.get('locations', [])).lower()
-            if 'arxiv' in locations:
-                arxiv_papers.append(work)
-        
-        if not arxiv_papers:
-            print("⚠️ No strict arXiv matches found, returning general results for this topic.",flush=True)
-            return results
-            
-        print(f"✅ Found {len(arxiv_papers)} papers.", flush=True)
-        return arxiv_papers
-        
+        return results
     except Exception as e:
         print(f"❌ Error: {e}", flush=True)
         return []
 
-def build_mega_graph(data):
-    G = nx.DiGraph() 
-
+def build_mega_graph(data, include_authors=True):
+    G = nx.DiGraph()
+    # 1. Add Paper Nodes
     for work in data:
-        paper_id = work.get('id')
-        paper_title = work.get('display_name')
+        p_id = work.get('id')
+        if p_id:
+            G.add_node(p_id, 
+                       title=f"PAPER: {work.get('display_name')}", 
+                       label=" ", # Clean look: no text on node
+                       citations=work.get('cited_by_count', 0),
+                       type='paper')
+
+    # 2. Add Edges (Citations and optionally Authors)
+    for work in data:
+        p_id = work.get('id')
+        if not p_id: continue
         
-        if not paper_id:
-            continue
-            
-        G.add_node(paper_id, label=paper_title, type='paper', color='skyblue')
+        for cited_id in work.get('referenced_works', []):
+            if cited_id in G:
+                G.add_edge(p_id, cited_id, relation='cites')
 
-        for authorship in work.get('authorships', []):
-            author = authorship.get('author', {})
-            author_id = author.get('id')
-            author_name = author.get('display_name') or "Unknown Author"
-            
-            if author_id:
-                G.add_node(author_id, label=author_name, type='author', color='orange')
-                G.add_edge(author_id, paper_id, relation='authored')
-
-        for cited_paper_id in work.get('referenced_works', []):
-            if cited_paper_id:
-                G.add_edge(paper_id, cited_paper_id, relation='cites')
-
+        if include_authors:
+            for authorship in work.get('authorships', []):
+                author = authorship.get('author', {})
+                a_id = author.get('id')
+                if a_id:
+                    if a_id not in G:
+                        G.add_node(a_id, 
+                                   title=f"AUTHOR: {author.get('display_name')}", 
+                                   label=" ", 
+                                   type='author',
+                                   color='#888888',
+                                   shape='square',
+                                   size=5)
+                    G.add_edge(a_id, p_id, relation='authored')
     return G
 
-if __name__ == "__main__":
-    TOPIC = "Black Holes"
-    LIMIT_PAPERS = 30
+def apply_visuals_and_save(G, output_file="research_graph.html"):
+    net = Network(height="750px", width="100%", bgcolor="#222222", font_color="white", directed=True)
+    
+    # Calculate paper citation scaling
+    paper_cites = [d.get('citations', 0) for n, d in G.nodes(data=True) if d.get('type') == 'paper']
+    max_cites = max(paper_cites) if paper_cites else 1
 
-    results = fetch_arxiv_data_via_openalex(TOPIC, limit=LIMIT_PAPERS)
-    print(f"Found {len(results)} papers", flush=True)
-    if results:
-        graph = build_mega_graph(results)
-        visualize_interactive_graph(graph)
+    for n, data in G.nodes(data=True):
+        node_props = data.copy()
+        if data.get('type') == 'paper':
+            cites = data.get('citations', 0)
+            # Heatmap color
+            if cites > (max_cites * 0.6): node_props['color'] = '#FFD700'
+            elif cites > (max_cites * 0.2): node_props['color'] = '#FF8C00'
+            else: node_props['color'] = '#4682B4'
+            node_props['size'] = 10 + (cites / max_cites * 40)
         
-        print(f"\nGraph Stats:", flush=True)
-        print(f"Total Entities (Authors + Papers): {graph.number_of_nodes()}", flush=True)
-        print(f"Total Connections (Authorship + Citations): {graph.number_of_edges()}", flush=True)
+        net.add_node(n, **node_props)
+
+    for s, t in G.edges():
+        net.add_edge(s, t, color='#555555')
+
+    net.toggle_physics(True)
+    path = os.path.join("/app/output", output_file)
+    net.save_graph(path)
+    print(f"✅ Graph saved to {path}")
+
+if __name__ == "__main__":
+    TOPIC = "Ising Model"
+    LIMIT = 200 
+    
+    results = fetch_arxiv_data_via_openalex(TOPIC, limit=LIMIT)
+    if results:
+        # Toggle include_authors=True/False here to switch modes
+        graph = build_mega_graph(results, include_authors=False)
+        apply_visuals_and_save(graph)
