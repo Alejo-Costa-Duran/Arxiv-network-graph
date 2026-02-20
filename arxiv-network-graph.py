@@ -7,8 +7,6 @@ def fetch_arxiv_data_via_openalex(topic, limit=50):
     Queries OpenAlex for arXiv papers. 
     OpenAlex is 'pre-indexed' arXiv data that includes citation links.
     """
-    # OpenAlex API endpoint for works
-    # Filter: only papers hosted on arXiv (primary_location.source.id: S4306400127 is arXiv)
     url = f"https://api.openalex.org/works?filter=primary_location.source.id:S4306400127,title.search:{topic}&per_page={limit}"
     
     print(f"Fetching {limit} papers about '{topic}'...")
@@ -20,16 +18,14 @@ def fetch_arxiv_data_via_openalex(topic, limit=50):
     return response.json().get('results', [])
 
 def build_mega_graph(data):
-    G = nx.DiGraph() # Directed graph for citations
+    G = nx.DiGraph()
 
     for work in data:
         paper_id = work.get('id')
         paper_title = work.get('display_name')
         
-        # 1. Add Paper Node
         G.add_node(paper_id, label=paper_title, type='paper', color='skyblue')
 
-        # 2. Add Author Nodes & 'Authored' Edges
         for authorship in work.get('authorships', []):
             author = authorship.get('author', {})
             author_id = author.get('id')
@@ -37,12 +33,7 @@ def build_mega_graph(data):
             
             G.add_node(author_id, label=author_name, type='author', color='orange')
             G.add_edge(author_id, paper_id, relation='authored')
-
-        # 3. Add Citation Edges (Paper -> Cited Paper)
-        # Note: OpenAlex provides IDs of papers this work cites
         for cited_paper_id in work.get('referenced_works', []):
-            # Only add the edge if the cited paper is also in our current dataset
-            # (Otherwise the graph gets too big/messy)
             G.add_edge(paper_id, cited_paper_id, relation='cites')
 
     return G
@@ -50,7 +41,6 @@ def build_mega_graph(data):
 def visualize_graph(G, output_file="research_graph.png"):
     plt.figure(figsize=(12, 12))
     
-    # Color nodes by type
     node_colors = [data['color'] for n, data in G.nodes(data=True)]
     labels = {n: data['label'][:20] + "..." if len(data['label']) > 20 else data['label'] 
               for n, data in G.nodes(data=True)}
@@ -65,10 +55,8 @@ def visualize_graph(G, output_file="research_graph.png"):
     print(f"Graph successfully saved to {output_file}")
 
 if __name__ == "__main__":
-    # --- CUSTOMIZE THESE ---
     TOPIC = "Black Holes"
     LIMIT_PAPERS = 30
-    # -----------------------
 
     results = fetch_arxiv_data_via_openalex(TOPIC, limit=LIMIT_PAPERS)
     if results:
